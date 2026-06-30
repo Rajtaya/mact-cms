@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, setAccessToken, setRefreshToken, getRefreshToken } from './api';
+import { api, setAccessToken } from './api';
 import type { Role } from './permissions';
 
 export interface AuthUser {
@@ -32,23 +32,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // Restore session on mount via refresh token.
+  // Restore session on mount: the httpOnly refresh cookie (if present) lets us
+  // mint a fresh access token without any client-readable token.
   useEffect(() => {
     (async () => {
-      if (!getRefreshToken()) {
-        setLoading(false);
-        return;
-      }
       try {
-        const { data } = await api.post('/auth/refresh', {
-          refreshToken: getRefreshToken(),
-        });
+        const { data } = await api.post('/auth/refresh', {});
         setAccessToken(data.accessToken);
-        setRefreshToken(data.refreshToken);
         const me = await api.get('/auth/me');
         setUser(me.data);
       } catch {
-        setRefreshToken(null);
+        setAccessToken(null);
       } finally {
         setLoading(false);
       }
@@ -57,8 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) {
     const { data } = await api.post('/auth/login', { email, password });
-    setAccessToken(data.accessToken);
-    setRefreshToken(data.refreshToken);
+    setAccessToken(data.accessToken); // refresh token is set as an httpOnly cookie
     setUser(data.user);
     router.push('/dashboard');
   }
@@ -70,7 +63,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       /* ignore */
     }
     setAccessToken(null);
-    setRefreshToken(null);
     setUser(null);
     router.push('/login');
   }
