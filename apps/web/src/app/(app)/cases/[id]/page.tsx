@@ -36,6 +36,7 @@ export default function CaseDetailPage() {
     { key: 'respondents', label: 'Respondents & Witnesses' },
     { key: 'hearings', label: 'Hearings', badge: c.hearings?.length },
     { key: 'documents', label: 'Documents', badge: c.documents?.length },
+    { key: 'expenses', label: 'Expenses', badge: c.expenses?.length },
     ...(can(user?.role, 'fees.view') ? [{ key: 'fees', label: 'Fees' }] : []),
     ...(can(user?.role, 'calculator.use') ? [{ key: 'compensation', label: 'Compensation', badge: c.compensations?.length }] : []),
   ];
@@ -81,6 +82,7 @@ export default function CaseDetailPage() {
       {tab === 'respondents' && <RespondentsTab c={c} />}
       {tab === 'hearings' && <HearingsTab caseId={id} hearings={c.hearings ?? []} editable={editable} />}
       {tab === 'documents' && <DocumentsTab caseId={id} documents={c.documents ?? []} editable={editable} />}
+      {tab === 'expenses' && <ExpensesTab caseId={id} editable={editable} />}
       {tab === 'fees' && <FeesTab caseId={id} />}
       {tab === 'compensation' && <CompensationTab caseId={id} estimates={c.compensations ?? []} />}
     </div>
@@ -479,6 +481,106 @@ Received by: ${esc(r.recordedBy)}
           <Field label="Notes"><Input value={pay.notes ?? ''} onChange={(e) => setPay({ ...pay, notes: e.target.value })} /></Field>
           <Button className="w-full" disabled={!pay.amount || addPay.isPending} onClick={() => addPay.mutate()}>
             {addPay.isPending ? 'Saving…' : 'Save payment'}
+          </Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+const EXPENSE_CATEGORIES = ['COURT_FEE', 'PROCESS_FEE', 'TRAVEL', 'PHOTOCOPY', 'POSTAGE', 'STAMP_PAPER', 'EXPERT_FEE', 'CLERICAL', 'MISC'];
+
+function ExpensesTab({ caseId, editable }: { caseId: string; editable: boolean }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<any>({ category: 'COURT_FEE', isReimbursable: true });
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['expenses', caseId],
+    queryFn: async () => (await api.get(`/cases/${caseId}/expenses`)).data,
+  });
+
+  const add = useMutation({
+    mutationFn: async () => (await api.post(`/cases/${caseId}/expenses`, {
+      category: form.category,
+      description: form.description || undefined,
+      amount: Number(form.amount),
+      expenseDate: form.expenseDate || undefined,
+      isReimbursable: form.isReimbursable,
+      receiptRef: form.receiptRef || undefined,
+    })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses', caseId] });
+      qc.invalidateQueries({ queryKey: ['case', caseId] });
+      setOpen(false);
+      setForm({ category: 'COURT_FEE', isReimbursable: true });
+    },
+  });
+
+  const del = useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/expenses/${id}`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses', caseId] });
+      qc.invalidateQueries({ queryKey: ['case', caseId] });
+    },
+  });
+
+  if (isLoading) return <Spinner label="Loading expenses…" />;
+  const rows = data?.expenses ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card className="p-5">
+          <p className="text-sm text-muted-foreground">Total case expenses</p>
+          <p className="mt-1 text-3xl font-semibold">{formatINR(data?.total)}</p>
+        </Card>
+        <Card className="p-5">
+          <p className="text-sm text-muted-foreground">Pending reimbursement</p>
+          <p className="mt-1 text-3xl font-semibold text-primary">{formatINR(data?.pendingReimbursement)}</p>
+        </Card>
+      </div>
+
+      <Section title="Expense ledger" action={editable && <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Add expense</Button>}>
+        {rows.length ? (
+          <div className="divide-y divide-border">
+            {rows.map((e: any) => (
+              <div key={e.id} className="flex items-center justify-between py-2.5 text-sm">
+                <div>
+                  <p className="font-medium">
+                    {formatINR(e.amount)} <Badge className="ml-2">{e.category.replace(/_/g, ' ')}</Badge>
+                    {e.isReimbursable && !e.reimbursed && <Badge className="ml-1 bg-primary/15 text-primary">recoverable</Badge>}
+                    {e.reimbursed && <Badge className="ml-1">reimbursed</Badge>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDate(e.expenseDate)}{e.description ? ` · ${e.description}` : ''}{e.receiptRef ? ` · #${e.receiptRef}` : ''}
+                    {e.createdBy ? ` · by ${e.createdBy.fullName}` : ''}
+                  </p>
+                </div>
+                {editable && <Button variant="ghost" size="sm" onClick={() => del.mutate(e.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}
+              </div>
+            ))}
+          </div>
+        ) : <Empty message="No expenses logged for this case." />}
+      </Section>
+
+      <Modal open={open} onClose={() => setOpen(false)} title="Add case expense">
+        <div className="space-y-3">
+          <Field label="Category">
+            <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+              {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+            </Select>
+          </Field>
+          <Field label="Amount (₹) *"><Input type="number" value={form.amount ?? ''} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></Field>
+          <Field label="Date"><Input type="date" value={form.expenseDate ?? ''} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} /></Field>
+          <Field label="Description"><Input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+          <Field label="Receipt / voucher no."><Input value={form.receiptRef ?? ''} onChange={(e) => setForm({ ...form, receiptRef: e.target.value })} /></Field>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.isReimbursable} onChange={(e) => setForm({ ...form, isReimbursable: e.target.checked })} />
+            Recoverable from client / award
+          </label>
+          <Button className="w-full" disabled={!form.amount || add.isPending} onClick={() => add.mutate()}>
+            {add.isPending ? 'Saving…' : 'Save expense'}
           </Button>
         </div>
       </Modal>

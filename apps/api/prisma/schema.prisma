@@ -197,6 +197,7 @@ model User {
   hearingsCreated Hearing[]      @relation("HearingCreatedBy")
   documents       Document[]     @relation("DocumentUploadedBy")
   feePayments     FeePayment[]   @relation("PaymentRecordedBy")
+  expensesLogged  CaseExpense[]  @relation("ExpenseCreatedBy")
   activities      Activity[]
   auditLogs       AuditLog[]
   notifications   Notification[]
@@ -342,6 +343,7 @@ model Case {
   documents     Document[]
   fee           FeeArrangement?
   compensations CompensationEstimate[]
+  expenses      CaseExpense[]
   assignees     CaseAssignee[]
   activities    Activity[]
   notifications Notification[]
@@ -353,6 +355,40 @@ model Case {
   @@index([leadAdvocateId])
   @@index([mactCaseNumber])
   @@map("cases")
+}
+
+enum ExpenseCategory {
+  COURT_FEE
+  PROCESS_FEE
+  TRAVEL
+  PHOTOCOPY
+  POSTAGE
+  STAMP_PAPER
+  EXPERT_FEE
+  CLERICAL
+  MISC
+}
+
+// Out-of-pocket costs incurred on a case (recoverable from the client/award).
+model CaseExpense {
+  id             String          @id @default(cuid())
+  caseId         String
+  case           Case            @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  category       ExpenseCategory @default(MISC)
+  description    String?
+  amount         Decimal         @db.Decimal(12, 2)
+  expenseDate    DateTime        @default(now())
+  isReimbursable Boolean         @default(true)
+  reimbursed     Boolean         @default(false)
+  receiptRef     String? // bill/voucher number
+  createdById    String?
+  createdBy      User?           @relation("ExpenseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([caseId])
+  @@index([expenseDate])
+  @@map("case_expenses")
 }
 
 // Junior advocates / staff assigned to a case (M:N with role context)

@@ -12,6 +12,7 @@ import { HearingsModule } from './hearings/hearings.module';
 import { DocumentsModule } from './documents/documents.module';
 import { FeesModule } from './fees/fees.module';
 import { CompensationModule } from './compensation/compensation.module';
+import { ExpensesModule } from './expenses/expenses.module';
 import { SettingsModule } from './settings/settings.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ReportsModule } from './reports/reports.module';
@@ -36,6 +37,7 @@ import { DateCoercionInterceptor } from './common/interceptors/date-coercion.int
     DocumentsModule,
     FeesModule,
     CompensationModule,
+    ExpensesModule,
     SettingsModule,
     DashboardModule,
     ReportsModule,

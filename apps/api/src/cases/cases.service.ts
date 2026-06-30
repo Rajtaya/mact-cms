@@ -207,6 +207,7 @@ export class CasesService {
         hearings: { orderBy: { hearingDate: 'desc' } },
         documents: { where: { deletedAt: null } },
         compensations: true,
+        expenses: { orderBy: { expenseDate: 'desc' } },
         assignees: { include: { user: { select: { fullName: true, role: true } } } },
       },
     });
