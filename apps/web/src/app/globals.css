@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Enterprise palette — deep indigo primary, neutral slate surfaces. */
+:root {
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --primary: 231 48% 48%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 40% 94%;
+  --secondary-foreground: 222 47% 20%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 32% 88%;
+  --input: 214 32% 88%;
+  --ring: 231 48% 48%;
+  --sidebar: 222 47% 13%;
+  --sidebar-foreground: 210 40% 92%;
+  --radius: 0.6rem;
+}
+
+.dark {
+  --background: 222 47% 9%;
+  --foreground: 210 40% 96%;
+  --card: 222 47% 12%;
+  --card-foreground: 210 40% 96%;
+  --primary: 231 60% 64%;
+  --primary-foreground: 222 47% 11%;
+  --secondary: 217 33% 18%;
+  --secondary-foreground: 210 40% 92%;
+  --muted: 217 33% 16%;
+  --muted-foreground: 215 20% 65%;
+  --destructive: 0 63% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 217 33% 22%;
+  --input: 217 33% 22%;
+  --ring: 231 60% 64%;
+  --sidebar: 222 47% 7%;
+  --sidebar-foreground: 210 40% 88%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-feature-settings: 'rlig' 1, 'calt' 1;
+}

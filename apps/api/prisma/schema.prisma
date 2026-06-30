@@ -1,0 +1,798 @@
+// ============================================================================
+// MACT Case Management System — Prisma schema
+// Domain: Motor Accident Claims Tribunal (MACT) litigation, India
+// DB: PostgreSQL
+//
+// Design notes
+//  - Fully normalized. A Case is the aggregate root. Most detail blocks are
+//    1:1 (AccidentDetail, ClaimPetition) or 1:N (Claimant, Vehicle, Hearing...).
+//  - In MACT practice each *offending vehicle* carries its own driver, owner
+//    and insurer, so Driver/Owner/Insurance hang off Vehicle, not off Case.
+//  - Money is stored as Decimal(14,2) (paise-safe up to ~99 crore). Never Float.
+//  - Soft-delete via deletedAt on the big aggregates; audit trail in AuditLog.
+//  - Settings master-data (Court, Judge, InsuranceCompany, PoliceStation,
+//    Hospital) are referenced by FK where a canonical entity exists, with a
+//    free-text fallback column for legacy/ad-hoc data entry.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// Enums
+// ----------------------------------------------------------------------------
+
+enum Role {
+  ADMINISTRATOR
+  ADVOCATE
+  JUNIOR_ADVOCATE
+  OFFICE_STAFF
+  READ_ONLY
+}
+
+enum CaseStatus {
+  DRAFT // office-staff draft, not yet submitted to an advocate
+  ACTIVE
+  RESERVED_FOR_ORDER
+  DECIDED
+  DISPOSED
+  WITHDRAWN
+  ABATED
+  TRANSFERRED
+  ON_HOLD
+}
+
+// Outcome of a decided case — drives the litigation success-rate KPI
+enum CaseOutcome {
+  PENDING
+  ALLOWED // award granted in claimant's favour
+  PARTLY_ALLOWED
+  DISMISSED
+  COMPROMISED
+}
+
+// Procedural stage of a MACT claim petition
+enum CaseStage {
+  FILING
+  SCRUTINY
+  ADMISSION
+  NOTICE_TO_RESPONDENTS
+  WRITTEN_STATEMENT
+  FRAMING_OF_ISSUES
+  CLAIMANT_EVIDENCE
+  RESPONDENT_EVIDENCE
+  FINAL_ARGUMENTS
+  AWARD
+  EXECUTION
+  APPEAL
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum PartyType {
+  CLAIMANT
+  RESPONDENT
+}
+
+enum VictimType {
+  DECEASED
+  INJURED
+}
+
+enum VehicleRole {
+  OFFENDING
+  VICTIM_VEHICLE
+  OTHER
+}
+
+enum RespondentType {
+  DRIVER
+  OWNER
+  INSURER
+  STATE
+  OTHER
+}
+
+enum WitnessType {
+  EYE_WITNESS
+  POLICE
+  MEDICAL
+  EXPERT
+  PANCH
+  OTHER
+}
+
+enum HearingStatus {
+  SCHEDULED
+  HELD
+  ADJOURNED
+  CANCELLED
+  PART_HEARD
+}
+
+enum DocumentCategory {
+  FIR
+  INSURANCE
+  MEDICAL
+  COURT_ORDERS
+  PHOTOGRAPHS
+  VIDEOS
+  AADHAAR
+  RC
+  DRIVING_LICENCE
+  AWARD_COPY
+  POLICE_RECORD
+  OTHER
+}
+
+enum FeeType {
+  PERCENTAGE
+  FIXED
+  HYBRID
+}
+
+enum PaymentMode {
+  CASH
+  CHEQUE
+  UPI
+  BANK_TRANSFER
+  CARD
+  DD
+  OTHER
+}
+
+enum NotificationType {
+  HEARING_TOMORROW
+  HEARING_TODAY
+  INSURANCE_EXPIRY
+  PENDING_DOCUMENT
+  PENDING_FEE
+  CASE_ASSIGNED
+  SYSTEM
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  UPLOAD
+  DOWNLOAD
+}
+
+// ----------------------------------------------------------------------------
+// Identity & access
+// ----------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  role         Role     @default(READ_ONLY)
+  isActive     Boolean  @default(true)
+  tokenVersion Int      @default(0) // bump to revoke all refresh tokens
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  // Relations
+  casesAsLead     Case[]         @relation("CaseLeadAdvocate")
+  casesAssigned   CaseAssignee[]
+  hearingsCreated Hearing[]      @relation("HearingCreatedBy")
+  documents       Document[]     @relation("DocumentUploadedBy")
+  feePayments     FeePayment[]   @relation("PaymentRecordedBy")
+  activities      Activity[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+
+  @@index([role])
+  @@index([isActive])
+  @@map("users")
+}
+
+// ----------------------------------------------------------------------------
+// Settings / master data
+// ----------------------------------------------------------------------------
+
+model Court {
+  id              String  @id @default(cuid())
+  name            String
+  courtNumber     String?
+  district        String?
+  state           String?
+  presidingOfficer String?
+  address         String?
+  isActive        Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  cases  Case[]
+  judges Judge[]
+
+  @@unique([name, courtNumber])
+  @@index([district])
+  @@map("courts")
+}
+
+model Judge {
+  id          String   @id @default(cuid())
+  name        String
+  designation String?
+  courtId     String?
+  court       Court?   @relation(fields: [courtId], references: [id], onDelete: SetNull)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([courtId])
+  @@map("judges")
+}
+
+model InsuranceCompany {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  shortName   String?
+  irdaCode    String?
+  address     String?
+  contactNo   String?
+  email       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  policies    Insurance[]
+  respondents Respondent[] @relation("CaseRespondentInsurer")
+
+  @@map("insurance_companies")
+}
+
+model PoliceStation {
+  id        String   @id @default(cuid())
+  name      String
+  district  String?
+  state     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accidents AccidentDetail[]
+
+  @@unique([name, district])
+  @@map("police_stations")
+}
+
+model Hospital {
+  id        String   @id @default(cuid())
+  name      String
+  city      String?
+  district  String?
+  state     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  medicalDetails MedicalDetail[]
+
+  @@unique([name, city])
+  @@map("hospitals")
+}
+
+// ----------------------------------------------------------------------------
+// Case aggregate root
+// ----------------------------------------------------------------------------
+
+model Case {
+  id              String   @id @default(cuid())
+  caseRef         String   @unique // human-friendly auto id, e.g. MACT-2026-00042
+  mactCaseNumber  String?  // official tribunal case number
+  courtId         String?
+  court           Court?   @relation(fields: [courtId], references: [id], onDelete: SetNull)
+  courtNumber     String?
+  presidingOfficer String?
+  benchDetails    String?  // bench / coram composition
+  physicalFileLocation String? // shelf-cabinet mapping for the paper file
+
+  filingDate       DateTime?
+  registrationDate DateTime?
+  institutionDate  DateTime?
+  nextHearingDate  DateTime?
+  prevHearingDate  DateTime?
+
+  status   CaseStatus  @default(ACTIVE)
+  outcome  CaseOutcome @default(PENDING) // for litigation success-rate KPI
+  stage    CaseStage   @default(FILING)
+  priority Priority    @default(NORMAL)
+
+  caseSummary   String? @db.Text
+  internalNotes String? @db.Text
+
+  leadAdvocateId String?
+  leadAdvocate   User?   @relation("CaseLeadAdvocate", fields: [leadAdvocateId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Detail blocks
+  claimPetition ClaimPetition?
+  accident      AccidentDetail?
+  claimants     Claimant[]
+  victims       Victim[]
+  vehicles      Vehicle[]
+  respondents   Respondent[]
+  witnesses     Witness[]
+  medicalDetails MedicalDetail[]
+  hearings      Hearing[]
+  documents     Document[]
+  fee           FeeArrangement?
+  compensations CompensationEstimate[]
+  assignees     CaseAssignee[]
+  activities    Activity[]
+  notifications Notification[]
+
+  @@index([status])
+  @@index([stage])
+  @@index([priority])
+  @@index([nextHearingDate])
+  @@index([leadAdvocateId])
+  @@index([mactCaseNumber])
+  @@map("cases")
+}
+
+// Junior advocates / staff assigned to a case (M:N with role context)
+model CaseAssignee {
+  id       String   @id @default(cuid())
+  caseId   String
+  case     Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now())
+
+  @@unique([caseId, userId])
+  @@index([userId])
+  @@map("case_assignees")
+}
+
+model ClaimPetition {
+  id                  String   @id @default(cuid())
+  caseId              String   @unique
+  case                Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  petitionNumber      String?
+  petitionDate        DateTime?
+  claimAmount         Decimal? @db.Decimal(14, 2)
+  compensationAwarded Decimal? @db.Decimal(14, 2)
+  interestRate        Decimal? @db.Decimal(5, 2) // % per annum
+  awardDate           DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("claim_petitions")
+}
+
+// ----------------------------------------------------------------------------
+// Parties — claimants, victims, respondents, witnesses
+// ----------------------------------------------------------------------------
+
+model Claimant {
+  id             String   @id @default(cuid())
+  caseId         String
+  case           Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  name           String
+  guardianName   String?  // father / husband name
+  relationToVictim String?
+  address        String?  @db.Text
+  mobile         String?
+  email          String?
+  aadhaar        String?  // store masked/encrypted at app layer
+  pan            String?
+  occupation     String?
+  monthlyIncome  Decimal? @db.Decimal(12, 2)
+  dateOfBirth    DateTime?
+  age            Int?
+  // Bank details
+  bankName       String?
+  bankAccountNo  String?
+  bankIfsc       String?
+  bankBranch     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([mobile])
+  @@map("claimants")
+}
+
+model Victim {
+  id                 String     @id @default(cuid())
+  caseId             String
+  case               Case       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  type               VictimType
+  name               String
+  age                Int?
+  occupation         String?
+  monthlyIncome      Decimal?   @db.Decimal(12, 2)
+  futureProspectsPct Decimal?   @db.Decimal(5, 2) // % addition per Pranay Sethi
+  disabilityPct      Decimal?   @db.Decimal(5, 2)
+  natureOfInjury     String?    @db.Text
+  dateOfDeath        DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@index([caseId])
+  @@map("victims")
+}
+
+model Respondent {
+  id              String         @id @default(cuid())
+  caseId          String
+  case            Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  type            RespondentType
+  name            String
+  address         String?        @db.Text
+  mobile          String?
+  // when the respondent is an insurer we can link the canonical company
+  insurerId       String?
+  insurer         InsuranceCompany? @relation("CaseRespondentInsurer", fields: [insurerId], references: [id], onDelete: SetNull)
+  remarks         String?        @db.Text
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([caseId])
+  @@index([type])
+  @@map("respondents")
+}
+
+model Witness {
+  id        String      @id @default(cuid())
+  caseId    String
+  case      Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  name      String
+  address   String?     @db.Text
+  mobile    String?
+  type      WitnessType @default(OTHER)
+  statement String?     @db.Text
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([caseId])
+  @@map("witnesses")
+}
+
+// ----------------------------------------------------------------------------
+// Accident
+// ----------------------------------------------------------------------------
+
+model AccidentDetail {
+  id              String   @id @default(cuid())
+  caseId          String   @unique
+  case            Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  accidentDate    DateTime?
+  accidentTime    String?  // free text e.g. "21:30 hrs"
+  location        String?  @db.Text
+  district        String?
+  state           String?
+  latitude        Decimal? @db.Decimal(9, 6)
+  longitude       Decimal? @db.Decimal(9, 6)
+  policeStationId String?
+  policeStation   PoliceStation? @relation(fields: [policeStationId], references: [id], onDelete: SetNull)
+  firNumber       String?
+  ddrNumber       String?
+  description     String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([firNumber])
+  @@map("accident_details")
+}
+
+// ----------------------------------------------------------------------------
+// Vehicles & their driver / owner / insurer
+// ----------------------------------------------------------------------------
+
+model Vehicle {
+  id               String      @id @default(cuid())
+  caseId           String
+  case             Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  role             VehicleRole @default(OFFENDING)
+  registrationNo   String?
+  vehicleType      String?     // car, truck, two-wheeler...
+  make             String?
+  model            String?
+  chassisNumber    String?
+  engineNumber     String?
+  registrationDate DateTime?
+  permitNumber     String?
+  permitValidity   DateTime?
+  fitnessValidity  DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  driver    Driver?
+  owner     Owner?
+  insurance Insurance?
+
+  @@index([caseId])
+  @@index([registrationNo])
+  @@map("vehicles")
+}
+
+model Driver {
+  id              String   @id @default(cuid())
+  vehicleId       String   @unique
+  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  name            String
+  fatherName      String?
+  address         String?  @db.Text
+  mobile          String?
+  licenceNumber   String?
+  licenceValidity DateTime?
+  licenceCategory String?  // LMV, HMV, MCWG...
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("drivers")
+}
+
+model Owner {
+  id        String   @id @default(cuid())
+  vehicleId String   @unique
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  name      String
+  address   String?  @db.Text
+  mobile    String?
+  aadhaar   String?
+  pan       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("owners")
+}
+
+model Insurance {
+  id                 String   @id @default(cuid())
+  vehicleId          String   @unique
+  vehicle            Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  insuranceCompanyId String?
+  insuranceCompany   InsuranceCompany? @relation(fields: [insuranceCompanyId], references: [id], onDelete: SetNull)
+  companyNameText    String?  // fallback when no canonical company linked
+  policyNumber       String?
+  policyStartDate    DateTime?
+  policyExpiryDate   DateTime?
+  isThirdParty       Boolean  @default(true)
+  surveyor           String?
+  claimNumber        String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([policyNumber])
+  @@index([policyExpiryDate])
+  @@map("insurance_policies")
+}
+
+// ----------------------------------------------------------------------------
+// Medical / hospital records
+// ----------------------------------------------------------------------------
+
+model MedicalDetail {
+  id                String   @id @default(cuid())
+  caseId            String
+  case              Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  hospitalId        String?
+  hospital          Hospital? @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  hospitalNameText  String?
+  doctorName        String?
+  admissionDate     DateTime?
+  dischargeDate     DateTime?
+  treatmentDetails  String?  @db.Text
+  mlcNumber         String?
+  disabilityPct     Decimal? @db.Decimal(5, 2)
+  totalMedicalBills Decimal? @db.Decimal(12, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([caseId])
+  @@map("medical_details")
+}
+
+// ----------------------------------------------------------------------------
+// Hearings
+// ----------------------------------------------------------------------------
+
+model Hearing {
+  id              String        @id @default(cuid())
+  caseId          String
+  case            Case          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  hearingDate     DateTime
+  status          HearingStatus @default(SCHEDULED)
+  proceedings     String?       @db.Text
+  judgeRemarks    String?       @db.Text
+  advocateNotes   String?       @db.Text
+  nextHearingDate DateTime?
+  orderDocumentId String?       @unique
+  orderDocument   Document?     @relation("HearingOrder", fields: [orderDocumentId], references: [id], onDelete: SetNull)
+  createdById     String?
+  createdBy       User?         @relation("HearingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([caseId])
+  @@index([hearingDate])
+  @@index([status])
+  @@map("hearings")
+}
+
+// ----------------------------------------------------------------------------
+// Documents
+// ----------------------------------------------------------------------------
+
+model Document {
+  id           String           @id @default(cuid())
+  caseId       String
+  case         Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  category     DocumentCategory @default(OTHER)
+  title        String
+  description  String?          @db.Text
+  fileName     String
+  storageKey   String           // local path or S3/R2 object key
+  mimeType     String
+  sizeBytes    Int
+  checksum     String?          // sha256 for integrity / dedupe
+  tags         String[]         // searchable free-form tags
+  uploadedById String?
+  uploadedBy   User?            @relation("DocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  deletedAt    DateTime?
+
+  hearingOrder Hearing? @relation("HearingOrder")
+
+  @@index([caseId])
+  @@index([category])
+  @@index([tags], type: Gin)
+  @@map("documents")
+}
+
+// ----------------------------------------------------------------------------
+// Fees & payments
+// ----------------------------------------------------------------------------
+
+model FeeArrangement {
+  id            String   @id @default(cuid())
+  caseId        String   @unique
+  case          Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  feeType       FeeType  @default(FIXED)
+  fixedAmount   Decimal? @db.Decimal(12, 2)
+  percentage    Decimal? @db.Decimal(5, 2) // % of award when PERCENTAGE/HYBRID
+  agreedAmount  Decimal? @db.Decimal(12, 2) // total agreed/expected
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  payments FeePayment[]
+
+  @@map("fee_arrangements")
+}
+
+model FeePayment {
+  id            String      @id @default(cuid())
+  feeId         String
+  fee           FeeArrangement @relation(fields: [feeId], references: [id], onDelete: Cascade)
+  amount        Decimal     @db.Decimal(12, 2)
+  paymentDate   DateTime    @default(now())
+  paymentMode   PaymentMode @default(CASH)
+  receiptNumber String      @unique
+  reference     String?     // cheque no / UPI ref / txn id
+  notes         String?     @db.Text
+  recordedById  String?
+  recordedBy    User?       @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime    @default(now())
+
+  @@index([feeId])
+  @@index([paymentDate])
+  @@map("fee_payments")
+}
+
+// ----------------------------------------------------------------------------
+// Compensation calculator (saved estimates / "what-if" runs)
+// ----------------------------------------------------------------------------
+
+model CompensationEstimate {
+  id                String   @id @default(cuid())
+  caseId            String
+  case              Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  label             String?  // e.g. "Claimant case", "Insurer's offer"
+  // Inputs
+  age               Int?
+  monthlyIncome     Decimal? @db.Decimal(12, 2)
+  futureProspectsPct Decimal? @db.Decimal(5, 2)
+  disabilityPct     Decimal? @db.Decimal(5, 2)
+  medicalExpenses   Decimal? @db.Decimal(12, 2)
+  funeralExpenses   Decimal? @db.Decimal(12, 2)
+  consortium        Decimal? @db.Decimal(12, 2)
+  attendantCharges  Decimal? @db.Decimal(12, 2)
+  transportCharges  Decimal? @db.Decimal(12, 2)
+  specialDiet       Decimal? @db.Decimal(12, 2)
+  painAndSuffering  Decimal? @db.Decimal(12, 2)
+  // Derived / snapshot of computation
+  multiplier        Int?
+  dependencyDeduction Decimal? @db.Decimal(5, 2)
+  computedLossOfDependency Decimal? @db.Decimal(14, 2)
+  totalCompensation Decimal? @db.Decimal(14, 2)
+  breakdown         Json?    // full structured breakdown for audit / print
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([caseId])
+  @@map("compensation_estimates")
+}
+
+// ----------------------------------------------------------------------------
+// Activity feed, notifications, audit
+// ----------------------------------------------------------------------------
+
+model Activity {
+  id        String   @id @default(cuid())
+  caseId    String?
+  case      Case?    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  verb      String   // "created case", "added hearing"...
+  summary   String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([caseId])
+  @@index([createdAt])
+  @@map("activities")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caseId    String?
+  case      Case?            @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String?          @db.Text
+  isRead    Boolean          @default(false)
+  dueAt     DateTime?        // when the reminder is relevant
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@index([dueAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  userId     String?
+  user       User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     AuditAction
+  entity     String      // table / model name
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  before     Json?
+  after      Json?
+  createdAt  DateTime    @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
