@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -106,6 +107,42 @@ export class AuthService {
       entityId: userId,
     });
     return { success: true };
+  }
+
+  /**
+   * Self-service password change. Verifies the current password, sets the new
+   * hash, and bumps tokenVersion (revoking every other session). Returns fresh
+   * tokens so the calling device stays signed in.
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+
+    const ok = await argon2.verify(user.passwordHash, currentPassword);
+    if (!ok) throw new BadRequestException('Current password is incorrect');
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('New password must differ from the current one');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: await AuthService.hash(newPassword),
+        tokenVersion: { increment: 1 },
+      },
+    });
+    await this.audit.record({
+      userId,
+      action: AuditAction.UPDATE,
+      entity: 'User',
+      entityId: userId,
+      after: { passwordChanged: true },
+    });
+    return this.issueTokens(updated);
   }
 
   async me(userId: string) {

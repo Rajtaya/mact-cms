@@ -135,12 +135,16 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
           <Sun className="h-4 w-4 dark:hidden" />
           <Moon className="hidden h-4 w-4 dark:block" />
         </button>
-        <div className="hidden text-right sm:block">
+        <Link
+          href="/account"
+          className="hidden rounded-md px-2 py-1 text-right hover:bg-secondary sm:block"
+          title="Account settings"
+        >
           <p className="text-sm font-medium leading-tight">{user?.fullName}</p>
           <p className="text-xs text-muted-foreground">
             {user && ROLE_LABELS[user.role]}
           </p>
-        </div>
+        </Link>
         <button
           onClick={logout}
           className="rounded-md p-2 hover:bg-secondary"

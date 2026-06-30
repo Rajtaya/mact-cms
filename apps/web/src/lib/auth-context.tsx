@@ -23,6 +23,7 @@ interface AuthState {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -67,8 +68,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/login');
   }
 
+  async function changePassword(currentPassword: string, newPassword: string) {
+    const { data } = await api.post('/auth/change-password', {
+      currentPassword,
+      newPassword,
+    });
+    // tokenVersion bumped server-side; adopt the fresh access token.
+    setAccessToken(data.accessToken);
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, changePassword }}>
       {children}
     </AuthContext.Provider>
   );

@@ -7,6 +7,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 const REFRESH_COOKIE = 'refreshToken';
 const REFRESH_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -68,6 +69,22 @@ export class AuthController {
   ) {
     res.clearCookie(REFRESH_COOKIE, { path: '/api/auth' });
     return this.auth.logout(userId);
+  }
+
+  @Post('change-password')
+  async changePassword(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.auth.changePassword(
+      userId,
+      dto.currentPassword,
+      dto.newPassword,
+    );
+    // Re-issue the refresh cookie so this device stays signed in.
+    this.setRefreshCookie(res, result.refreshToken);
+    return result;
   }
 
   @Get('me')
