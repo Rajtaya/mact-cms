@@ -2,6 +2,10 @@
 # Build context is the repo root; we build only the apps/web workspace.
 FROM node:22-slim AS build
 WORKDIR /app
+# Next.js bakes rewrites() at build time, so API_URL must be present here.
+# Railway injects the matching service variable into this ARG.
+ARG API_URL
+ENV API_URL=$API_URL
 COPY apps/web/package.json ./
 RUN npm install
 COPY apps/web/ ./
