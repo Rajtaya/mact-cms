@@ -9,6 +9,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: false });
   const logger = new Logger('Bootstrap');
 
+  // Behind Railway's edge proxy — trust it so req.ip is the real client IP
+  // (correct audit-log origins + per-client rate limiting).
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   app.use(helmet());
   app.enableCors({
     origin: (process.env.FRONTEND_URL ?? 'http://localhost:3000').split(','),
