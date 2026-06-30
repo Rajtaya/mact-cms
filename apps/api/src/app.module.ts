@@ -23,7 +23,9 @@ import { DateCoercionInterceptor } from './common/interceptors/date-coercion.int
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    ThrottlerModule.forRoot({
+      throttlers: [{ name: 'default', ttl: 60_000, limit: 120 }],
+    }),
     PrismaModule,
     AuditModule,
     AuthModule,
