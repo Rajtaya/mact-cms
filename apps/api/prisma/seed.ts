@@ -9,11 +9,16 @@ import * as argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
+// Seed password comes from the environment. Falls back to a dev-only default
+// for LOCAL use; never ship this default to a reachable environment.
+const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'Password@123';
+
 async function user(email: string, fullName: string, role: Role) {
-  const passwordHash = await argon2.hash('Password@123');
+  const passwordHash = await argon2.hash(SEED_PASSWORD);
+  // Update passwordHash too, so re-running the seed rotates credentials.
   return prisma.user.upsert({
     where: { email },
-    update: { role, fullName },
+    update: { role, fullName, passwordHash },
     create: { email, fullName, role, passwordHash },
   });
 }
@@ -147,7 +152,7 @@ async function main() {
     });
   }
 
-  console.log('Seed complete. Login with admin@mact.local / Password@123');
+  console.log('Seed complete. Admin: admin@mact.local (password from $SEED_PASSWORD).');
 }
 
 main()

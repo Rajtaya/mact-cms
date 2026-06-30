@@ -407,21 +407,25 @@ function FeesTab({ caseId }: { caseId: string }) {
   async function receipt(id: string) {
     const r = (await api.get(`/fee/payments/${id}/receipt`)).data;
     const w = window.open('', '_blank');
-    if (w) {
-      w.document.write(`<pre style="font-family:monospace;padding:24px">
+    if (!w) return;
+    // Escape all server values to prevent HTML injection in the print window.
+    const esc = (v: any) =>
+      String(v ?? '-').replace(/[&<>"']/g, (ch) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string),
+      );
+    w.document.write(`<pre style="font-family:monospace;padding:24px">
 MACT CASE MANAGEMENT — FEE RECEIPT
 ====================================
-Receipt No : ${r.receiptNumber}
-Date       : ${new Date(r.date).toLocaleDateString('en-IN')}
-Case       : ${r.mactCaseNumber ?? r.caseRef}
-Claimant   : ${r.claimantName ?? '-'}
-Amount     : Rs. ${r.amount}
-Mode       : ${r.mode}
-Reference  : ${r.reference ?? '-'}
-Advocate   : ${r.advocate ?? '-'}
-Received by: ${r.recordedBy ?? '-'}
+Receipt No : ${esc(r.receiptNumber)}
+Date       : ${esc(new Date(r.date).toLocaleDateString('en-IN'))}
+Case       : ${esc(r.mactCaseNumber ?? r.caseRef)}
+Claimant   : ${esc(r.claimantName)}
+Amount     : Rs. ${esc(r.amount)}
+Mode       : ${esc(r.mode)}
+Reference  : ${esc(r.reference)}
+Advocate   : ${esc(r.advocate)}
+Received by: ${esc(r.recordedBy)}
 ====================================</pre><script>print()</script>`);
-    }
   }
 
   if (isLoading) return <Spinner />;

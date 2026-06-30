@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -12,6 +13,8 @@ import { RefreshDto } from './dto/refresh.dto';
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  // Brute-force protection: 5 login attempts per minute per IP.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Public()
   @Post('login')
   login(@Body() dto: LoginDto, @Req() req: Request) {

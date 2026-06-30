@@ -26,19 +26,21 @@ async function bootstrap() {
   );
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  // OpenAPI / Swagger
-  const config = new DocumentBuilder()
-    .setTitle('MACT CMS API')
-    .setDescription('Motor Accident Claims Tribunal — Case Management System')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const doc = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, doc);
+  // OpenAPI / Swagger — disabled in production to avoid disclosing the API
+  // surface to unauthenticated callers.
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('MACT CMS API')
+      .setDescription('Motor Accident Claims Tribunal — Case Management System')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const doc = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, doc);
+  }
 
   const port = Number(process.env.PORT ?? 4000);
   await app.listen(port);
   logger.log(`API running on http://localhost:${port}/api`);
-  logger.log(`Swagger docs at http://localhost:${port}/api/docs`);
 }
 bootstrap();

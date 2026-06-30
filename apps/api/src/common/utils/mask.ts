@@ -6,6 +6,7 @@ export const KYC_PRIVILEGED_ROLES = ['ADMINISTRATOR', 'ADVOCATE'];
 /** Field names that hold sensitive identifiers and must be masked. */
 export const SENSITIVE_FIELDS = new Set([
   'aadhaar',
+  'pan',
   'bankAccountNo',
 ]);
 
