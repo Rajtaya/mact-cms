@@ -18,6 +18,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { MaskingInterceptor } from './common/interceptors/masking.interceptor';
+import { DateCoercionInterceptor } from './common/interceptors/date-coercion.interceptor';
 
 @Module({
   imports: [
@@ -42,6 +43,8 @@ import { MaskingInterceptor } from './common/interceptors/masking.interceptor';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // Normalize date-only inputs to ISO before validation/persistence
+    { provide: APP_INTERCEPTOR, useClass: DateCoercionInterceptor },
     // KYC masking applied to every response for non-privileged roles
     { provide: APP_INTERCEPTOR, useClass: MaskingInterceptor },
   ],
